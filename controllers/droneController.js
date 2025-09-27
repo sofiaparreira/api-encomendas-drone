@@ -2,7 +2,7 @@ const { Drone: DroneModel, Drone } = require("../models/Drone");
 const { Pedido: PedidoModel, Pedido } = require("../models/Pedido");
 const { Fila: FilaModel, Fila } = require("../models/Fila");
 
-const { selecionarMelhorDroneParaPedido } = require("../utils/selecionarMelhorDroneParaPedido");
+const { selecionarMelhorDroneParaPedido, calcularDistanciaKm, parseNumberSafe } = require("../utils/selecionarMelhorDroneParaPedido");
 
 
 async function createDrone(req, res) {
@@ -187,30 +187,69 @@ async function updateStatusDrone(req, res) {
 }
 
 
-async function consumeDroneBattery(req, res) {
-  try {
-    const { id } = req.params;
-    const drone = await DroneModel.findById(id);
+async function simulateFlight(droneId) {
 
-    if (!drone) {
-      return res.status(404).json({ error: "Drone não encontrado" })
+  //len -> ler dados sem mexer no documento no banco
+  const drone = await DroneModel.findById(droneId).lean();
+  if(!drone || drone.status !== "entregando" || drone.status !== "retornando") { return }
+
+  const fila = await FilaModel.findOne({ droneId }).populate("pedidos")
+  if(!fila || !fila.pedidos.length) return;
+
+  const pedido = await PedidoModel.findById(fila.pedido[0]);
+
+  //localização do drone ira mudar
+  let droneX = parseFloat(drone.coordX)
+  let droneY = parseFloat(drone.coordY);
+  const destinoX = parseFloat(pedido.enderecoDestino.coordX)
+  const destinoY = parseFloat(pedido.enderecoDestino.coordY)
+
+  let baterry = drone.porcentagemBateria ?? 100
+  const speeedPer10Sec = 0.5;
+
+  if (baterry <= 0) {
+      clearInterval(interval);
+      console.log(`Drone ${droneId} ficou sem bateria!`);
+      return;
     }
-    if (drone.status !== "entregando" || drone.status !== "retornando") {
-      return res.status(400).json({ error: "Drone não está em voo" })
+
+    // nova posição aproximando do destino
+    const deltaX = destinoX - droneX;
+    const deltaY = destinoY - droneY;
+    const distance = Math.sqrt(deltaX ** 2 + deltaY ** 2);
+
+    if(distance <= speeedPer10Sec / 111) {
+      droneX = destinoX;
+      droneY = destinoY;
+      baterry -=5;
+
+      await DroneModel.findByIdAndUpdate(droneId, {
+         coordX: droneX,
+        coordY: droneY,
+        bateria: baterry,
+        status: "retornando"
+      });
+
+      pedido.status = "entregue";
+      await pedido.save();
+
+      // remove o pedido da fila
+      fila.pedidos.shift();
+      await fila.save();
+
+      clearInterval(interval)
+      console.log(`Drone ${droneId} chegou ao destino`)
+      return;
     }
 
-    const novaBateria = Math.max(drone.porcentagemBateria - 5, 0);
-    drone.porcentagemBateria = novaBateria;
-    await drone.save();
+    // movimentação proporcional
+    const ratio = speedKmPer10Sec / distance / 111; // ajuste km → grau
+    droneX += deltaX * ratio;
+    droneY += deltaY * ratio;
+    battery -= 1; 
 
-    return res.status(200).json({ bateria: novaBateria })
-
-
-  } catch (error) {
-    console.error("Erro ao atualizar bateria do drone:", error);
-    return res.status(500).json({ error: "Erro interno do servidor" });
-  }
 }
+
 
 
 module.exports = {
@@ -219,6 +258,6 @@ module.exports = {
   deleteDrone,
   getDroneById,
   updateStatusDrone,
-  consumeDroneBattery,
-  startFlight
+  startFlight,
+  simulateFlight
 };
