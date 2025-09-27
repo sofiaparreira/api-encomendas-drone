@@ -19,8 +19,10 @@ const pedidoSchema = new Schema({
         enum: ["pendente", "em_transporte", "entregue"],
         default: "pendente"
   },
-  prioridade: {
-    type: Number,
+  prioridadeId: {
+    type: Schema.Types.ObjectId,
+    ref: "Prioridade",
+    required: true
   },
   
   droneId: {type: Schema.Types.ObjectId, ref: "Drone", required: true}

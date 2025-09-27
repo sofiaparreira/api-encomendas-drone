@@ -1,6 +1,5 @@
-// services/droneService.js
 const { Drone } = require("../models/Drone");
-
+const { Fila: FilaModel, Fila } = require("../models/Fila");
 
 function parseNumberSafe(v) {
   if (v === undefined || v === null) return NaN;
@@ -12,10 +11,9 @@ function parseNumberSafe(v) {
   return NaN;
 }
 
-
 function calcularDistanciaKm(lat1, lon1, lat2, lon2) {
   const toRad = (deg) => (deg * Math.PI) / 180;
-  const R = 6371; 
+  const R = 6371; // raio da Terra em km
   const dLat = toRad(lat2 - lat1);
   const dLon = toRad(lon2 - lon1);
   const a =
@@ -27,68 +25,60 @@ function calcularDistanciaKm(lat1, lon1, lat2, lon2) {
 
 
 
-async function selecionarMelhorDroneParaPedido({ coordX, coordY, pesoKg }) {
+
+async function selecionarMelhorDroneParaPedido({ coordX, coordY, pesoKg, prioridade }) {
   const destinoLat = parseNumberSafe(coordX);
   const destinoLon = parseNumberSafe(coordY);
   const peso = parseNumberSafe(pesoKg);
 
-  if (Number.isNaN(destinoLat) || Number.isNaN(destinoLon)) {
-    throw new Error("coordX/coordY inválidos (devem ser números).");
-  }
-  if (Number.isNaN(peso)) {
-    throw new Error("pesoKg inválido (deve ser número).");
-  }
+  if (Number.isNaN(destinoLat) || Number.isNaN(destinoLon)) throw new Error("coordX/coordY inválidos");
+  if (Number.isNaN(peso)) throw new Error("pesoKg inválido");
 
-  const candidatos = await Drone.find({
-    status: "disponivel",
+  // Buscar drones disponíveis ou reservados
+  let candidatos = await Drone.find({
+    status: { $in: ["disponivel", "reservado"] },
     capacidadeMaxKg: { $gte: peso }
   }).lean();
 
-  console.log("[droneService] candidatos encontrados:", candidatos.length);
+  if (!candidatos.length) return null;
 
-  if (!candidatos || candidatos.length === 0) return null;
-  if (candidatos.length === 1) {
-    const only = candidatos[0];
-    const lat = parseNumberSafe(only.coordX);
-    const lon = parseNumberSafe(only.coordY);
-    only._distanciaKm = Number.isNaN(lat) || Number.isNaN(lon)
-      ? null
-      : Number(calcularDistanciaKm(destinoLat, destinoLon, lat, lon).toFixed(3));
-    return only;
-  }
+  const filas = await FilaModel.find({ droneId: { $in: candidatos.map(d => d._id) } }).populate("pedidos");
 
-  const candidatosComCoords = [];
-  const candidatosSemCoords = [];
+  candidatos = candidatos.map(d => {
+    const fila = filas.find(f => f.droneId.toString() === d._id.toString());
+    return {
+      ...d,
+      filaLength: fila ? fila.pedidos.length : 0,
+      filaLastPedidoCreatedAt: fila && fila.pedidos.length ? fila.pedidos[fila.pedidos.length - 1].createdAt : null
+    };
+  });
 
-  for (const c of candidatos) {
-    const lat = parseNumberSafe(c.coordX);
-    const lon = parseNumberSafe(c.coordY);
-    if (Number.isNaN(lat) || Number.isNaN(lon)) {
-      candidatosSemCoords.push(c);
-      continue;
-    }
-    const distKm = calcularDistanciaKm(destinoLat, destinoLon, lat, lon);
-    candidatosComCoords.push({ ...c, _distanciaKm: Number(distKm.toFixed(3)) });
-  }
+  candidatos.sort((a, b) => a.filaLength - b.filaLength);
 
-  if (candidatosComCoords.length > 0) {
-    candidatosComCoords.sort((a, b) => a._distanciaKm - b._distanciaKm);
-    const melhor = candidatosComCoords[0];
-    console.log("[droneService] melhor (com coords):", {
-      id: melhor._id,
-      distanciaKm: melhor._distanciaKm,
-      coordX: melhor.coordX,
-      coordY: melhor.coordY,
-      capacidade: melhor.capacidadeMaxKg
+  let minFila = candidatos[0].filaLength;
+  let empatesFila = candidatos.filter(d => d.filaLength === minFila);
+
+  if (empatesFila.length > 1) {
+    empatesFila.sort((a, b) => {
+      const aTime = a.filaLastPedidoCreatedAt ? new Date(a.filaLastPedidoCreatedAt).getTime() : 0;
+      const bTime = b.filaLastPedidoCreatedAt ? new Date(b.filaLastPedidoCreatedAt).getTime() : 0;
+      return aTime - bTime; 
     });
-    return melhor;
   }
 
+  if (empatesFila.length > 1) {
+    empatesFila.forEach(d => {
+      const lat = parseNumberSafe(d.coordX);
+      const lon = parseNumberSafe(d.coordY);
+      d._distanciaKm = Number.isNaN(lat) || Number.isNaN(lon)
+        ? Infinity
+        : calcularDistanciaKm(destinoLat, destinoLon, lat, lon);
+    });
+    empatesFila.sort((a, b) => a._distanciaKm - b._distanciaKm);
+  }
 
-  console.log("[droneService] nenhum candidato tinha coords válidas; retornando primeiro candidato");
-  return candidatosSemCoords[0] || candidatos[0];
+  return empatesFila[0];
 }
-
 module.exports = {
   selecionarMelhorDroneParaPedido,
   calcularDistanciaKm,

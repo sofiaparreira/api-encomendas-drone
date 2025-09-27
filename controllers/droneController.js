@@ -1,4 +1,9 @@
 const { Drone: DroneModel, Drone } = require("../models/Drone");
+const { Pedido: PedidoModel, Pedido } = require("../models/Pedido");
+const { Fila: FilaModel, Fila } = require("../models/Fila");
+
+const { selecionarMelhorDroneParaPedido } = require("../utils/selecionarMelhorDroneParaPedido");
+
 
 async function createDrone(req, res) {
   try {
@@ -47,6 +52,7 @@ async function getDroneById(req, res) {
   }
 }
 
+
 async function deleteDrone(req, res) {
   try {
     const id = req.params.id;
@@ -56,19 +62,99 @@ async function deleteDrone(req, res) {
     }
 
     const drone = await DroneModel.findById(id);
+    if (!drone) return res.status(404).json({ error: "Drone não encontrado" });
 
-    if (!drone) {
-      return res.status(404).json({ error: "Drone não encontrado" });
+    if (!["disponivel", "reservado"].includes(drone.status)) {
+      return res.status(400).json({ error: `Drone com status '${drone.status}' não pode ser excluído` });
+    }
+
+    const pedidos = await PedidoModel.find({ droneId: drone._id });
+
+    for (const pedido of pedidos) {
+      if (!pedido.prioridadeId) {
+        pedido.prioridadeId = "68d70331d1a141e0520c6c63";
+      }
+
+      const melhorDrone = await selecionarMelhorDroneParaPedido({
+        coordX: pedido.enderecoDestino.coordX,
+        coordY: pedido.enderecoDestino.coordY,
+        pesoKg: pedido.pesoKg,
+        prioridade: pedido.prioridadeId
+      });
+
+      if (!melhorDrone) {
+        console.warn(`Pedido ${pedido._id} não tem drone disponível e ficará sem atribuição.`);
+        continue;
+      }
+
+      pedido.droneId = melhorDrone._id;
+      await pedido.save();
+
+      let fila = await FilaModel.findOne({ droneId: melhorDrone._id });
+      if (fila) {
+        fila.pedidos.push(pedido._id);
+        await fila.save();
+      } else {
+        await FilaModel.create({ droneId: melhorDrone._id, pedidos: [pedido._id], status: "aguardando" });
+      }
+
+      if (melhorDrone.status === "disponivel") {
+        await DroneModel.findByIdAndUpdate(melhorDrone._id, { status: "reservado" });
+      }
     }
 
     await drone.deleteOne();
 
-    return res.status(200).json({ message: "Drone excluído com sucesso" });
+    return res.status(200).json({ message: "Drone excluído e pedidos realocados com sucesso" });
   } catch (e) {
     console.error("Erro ao excluir drone:", e.message);
     return res.status(500).json({ error: "Erro ao excluir drone, contate o suporte" });
   }
 }
+
+
+async function startFlight(req, res) {
+  try {
+    const droneId = req.params.id;
+
+    if(!droneId) {
+      return res.status(400).json({ error: "Id do drone não encontrado"})
+    }
+
+    const drone = await DroneModel.findById(droneId);
+    if(!drone) {
+      return res.status(404).json({ error: "Drone não encontrado"})
+    }
+
+    if(drone.status !== "reservado") {
+      return res.status(400).json({error: `Drone com status ${drone.status} não pode iniciar voo` })
+    }
+
+    // buscar o drone na fila dele
+    const fila = await FilaModel.findOne({ droneId }).populate("pedidos");
+    if(!fila || !fila.pedidos.length === 0) {
+      return res.status(400).json({ error: "Não há pedidos na fila para iniciar voo"})
+    }
+
+    // pega o primeiro pedido da fila
+    const pedido = fila.pedidos[0];
+    drone.status = "entregando"
+    await drone.save();
+
+    pedido.status = "em_transporte";
+    await pedido.save();
+
+    return res.status(200).json({
+      message: "Voo iniciado com sucesso",
+      drone: { id: drone._id, status: drone.status},
+      pedido: { id: pedido._id, status: pedido.status}
+    })
+  } catch (error) {
+     console.error("Erro startFlight:", err);
+    return res.status(500).json({ error: "Erro ao iniciar voo, contate o suporte" });
+  }
+}
+
 
 
 async function updateStatusDrone(req, res) {
@@ -99,6 +185,7 @@ async function updateStatusDrone(req, res) {
     return res.status(500).json({ error: "Erro interno do servidor" });
   }
 }
+
 
 async function consumeDroneBattery(req, res) {
   try {
@@ -132,5 +219,6 @@ module.exports = {
   deleteDrone,
   getDroneById,
   updateStatusDrone,
-  consumeDroneBattery
+  consumeDroneBattery,
+  startFlight
 };
