@@ -74,10 +74,29 @@ async function getPedidosEntregues(req, res) {
 }
 
 
+async function getPedidoByDroneId(req, res) {
+  const { id } = req.params;
+
+  try {
+    const pedido = await PedidoModel.findOne({ droneId: id });
+    if (!pedido) {
+      return res.status(404).json({ error: "Nenhum pedido encontrado para esse drone" })
+    }
+
+    return res.status(200).json(pedido);
+
+  } catch (error) {
+    console.error(error)
+    return res.status(500).json({ message: "Erro ao buscar pedido" })
+  }
+}
+
+
 
 module.exports = {
-    createPedido,
-    getPedidosPendentes,
-    getPedidosTransporte,
-    getPedidosEntregues
+  createPedido,
+  getPedidosPendentes,
+  getPedidosTransporte,
+  getPedidosEntregues,
+  getPedidoByDroneId
 };

@@ -79,7 +79,6 @@ async function updateStatusDrone(req, res) {
     if (!id) {
       return res.status(400).json({ error: "ID do drone é obrigatório" });
     }
-
     if (!status) {
       return res.status(404).json({ error: "Status é obrigatório " })
     }
@@ -93,11 +92,35 @@ async function updateStatusDrone(req, res) {
     if (!drone) {
       return res.status(404).json({ error: "Drone não encontrado" });
     }
-
     return res.status(200).json(drone);
 
   } catch (error) {
     console.error("Erro ao atualizar status do drone:", error);
+    return res.status(500).json({ error: "Erro interno do servidor" });
+  }
+}
+
+async function consumeDroneBattery(req, res) {
+  try {
+    const { id } = req.params;
+    const drone = await DroneModel.findById(id);
+
+    if (!drone) {
+      return res.status(404).json({ error: "Drone não encontrado" })
+    }
+    if (drone.status !== "entregando" || drone.status !== "retornando") {
+      return res.status(400).json({ error: "Drone não está em voo" })
+    }
+
+    const novaBateria = Math.max(drone.porcentagemBateria - 5, 0);
+    drone.porcentagemBateria = novaBateria;
+    await drone.save();
+
+    return res.status(200).json({ bateria: novaBateria })
+
+
+  } catch (error) {
+    console.error("Erro ao atualizar bateria do drone:", error);
     return res.status(500).json({ error: "Erro interno do servidor" });
   }
 }
@@ -108,5 +131,6 @@ module.exports = {
   getAllDrones,
   deleteDrone,
   getDroneById,
-  updateStatusDrone
+  updateStatusDrone,
+  consumeDroneBattery
 };
