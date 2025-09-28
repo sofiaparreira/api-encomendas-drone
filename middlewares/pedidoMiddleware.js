@@ -47,9 +47,7 @@ export const pedidoValidation = () => {
             .notEmpty().withMessage("O campo 'prioridadeId' é obrigatório")
             .isMongoId().withMessage("ID de prioridade inválido"),
 
-        body("droneId")
-            .notEmpty().withMessage("O campo 'droneId' é obrigatório")
-            .isMongoId().withMessage("ID de drone inválido")
+       
     ];
 };
 
