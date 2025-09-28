@@ -9,10 +9,12 @@ const {
         updateStatusPedido,
         deletePedido
     } = require("../controllers/pedidoController");
+const validate = require("../middlewares/handleValidate");
+const { pedidoValidation } = require("../middlewares/pedidoMiddleware");
 
 const router = express.Router();
 
-router.post("/", createPedido);
+router.post("/", pedidoValidation(), validate, createPedido);
 router.delete("/:id", deletePedido)
 
 router.get("/pendente", getPedidosPendentes)
