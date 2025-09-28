@@ -3,7 +3,7 @@ const { Pedido: PedidoModel, Pedido } = require("../models/Pedido");
 const { Fila: FilaModel, Fila } = require("../models/Fila");
 
 const { selecionarMelhorDroneParaPedido, calcularDistanciaKm, parseNumberSafe } = require("../utils/selecionarMelhorDroneParaPedido");
-
+const mongoose = require("mongoose");
 
 async function createDrone(req, res) {
   try {
@@ -113,47 +113,8 @@ async function deleteDrone(req, res) {
 }
 
 
-async function startFlight(req, res) {
-  try {
-    const droneId = req.params.id;
 
-    if(!droneId) {
-      return res.status(400).json({ error: "Id do drone não encontrado"})
-    }
 
-    const drone = await DroneModel.findById(droneId);
-    if(!drone) {
-      return res.status(404).json({ error: "Drone não encontrado"})
-    }
-
-    if(drone.status !== "reservado") {
-      return res.status(400).json({error: `Drone com status ${drone.status} não pode iniciar voo` })
-    }
-
-    // buscar o drone na fila dele
-    const fila = await FilaModel.findOne({ droneId }).populate("pedidos");
-    if(!fila || !fila.pedidos.length === 0) {
-      return res.status(400).json({ error: "Não há pedidos na fila para iniciar voo"})
-    }
-
-    // pega o primeiro pedido da fila
-    const pedido = fila.pedidos[0];
-    drone.status = "entregando"
-    await drone.save();
-
-    pedido.status = "em_transporte";
-    await pedido.save();
-
-    return res.status(200).json({
-      message: "Voo iniciado com sucesso",
-      drone: { id: drone._id, status: drone.status},
-      pedido: { id: pedido._id, status: pedido.status}
-    })
-  } catch (error) {
-     console.error("Erro startFlight:", err);
-    return res.status(500).json({ error: "Erro ao iniciar voo, contate o suporte" });
-  }
-}
 
 
 
@@ -187,69 +148,214 @@ async function updateStatusDrone(req, res) {
 }
 
 
-async function simulateFlight(droneId) {
+// no topo do arquivo certifique-se de ter:
+// const mongoose = require("mongoose");
+// const activeSimulations = new Map();
+const activeSimulations = new Map();
 
-  //len -> ler dados sem mexer no documento no banco
-  const drone = await DroneModel.findById(droneId).lean();
-  if(!drone || drone.status !== "entregando" || drone.status !== "retornando") { return }
+async function startFlight(req, res) {
+  try {
+    const droneId = req.params.id;
 
-  const fila = await FilaModel.findOne({ droneId }).populate("pedidos")
-  if(!fila || !fila.pedidos.length) return;
-
-  const pedido = await PedidoModel.findById(fila.pedido[0]);
-
-  //localização do drone ira mudar
-  let droneX = parseFloat(drone.coordX)
-  let droneY = parseFloat(drone.coordY);
-  const destinoX = parseFloat(pedido.enderecoDestino.coordX)
-  const destinoY = parseFloat(pedido.enderecoDestino.coordY)
-
-  let baterry = drone.porcentagemBateria ?? 100
-  const speeedPer10Sec = 0.5;
-
-  if (baterry <= 0) {
-      clearInterval(interval);
-      console.log(`Drone ${droneId} ficou sem bateria!`);
-      return;
+    if (!droneId) {
+      return res.status(400).json({ error: "Id do drone não encontrado" });
     }
 
-    // nova posição aproximando do destino
-    const deltaX = destinoX - droneX;
-    const deltaY = destinoY - droneY;
-    const distance = Math.sqrt(deltaX ** 2 + deltaY ** 2);
-
-    if(distance <= speeedPer10Sec / 111) {
-      droneX = destinoX;
-      droneY = destinoY;
-      baterry -=5;
-
-      await DroneModel.findByIdAndUpdate(droneId, {
-         coordX: droneX,
-        coordY: droneY,
-        bateria: baterry,
-        status: "retornando"
-      });
-
-      pedido.status = "entregue";
-      await pedido.save();
-
-      // remove o pedido da fila
-      fila.pedidos.shift();
-      await fila.save();
-
-      clearInterval(interval)
-      console.log(`Drone ${droneId} chegou ao destino`)
-      return;
+    // valida id
+    if (!mongoose.Types.ObjectId.isValid(droneId)) {
+      return res.status(400).json({ error: "ID do drone inválido" });
     }
 
-    // movimentação proporcional
-    const ratio = speedKmPer10Sec / distance / 111; // ajuste km → grau
-    droneX += deltaX * ratio;
-    droneY += deltaY * ratio;
-    battery -= 1; 
+    const drone = await DroneModel.findById(droneId);
+    if (!drone) {
+      return res.status(404).json({ error: "Drone não encontrado" });
+    }
 
+    if (drone.status !== "reservado") {
+      return res
+        .status(400)
+        .json({ error: `Drone com status ${drone.status} não pode iniciar voo` });
+    }
+
+    // buscar a fila e verificar pedidos — passamos a string droneId, Mongoose faz o cast
+    const fila = await FilaModel.findOne({ droneId }).populate("pedidos");
+    if (!fila || fila.pedidos.length === 0) {
+      return res
+        .status(400)
+        .json({ error: "Não há pedidos na fila para iniciar voo" });
+    }
+
+    const pedido = fila.pedidos[0];
+
+    // salva as coordenadas atuais como "base" e qual pedido está sendo entregue
+    drone.homeCoordX = drone.coordX;
+    drone.homeCoordY = drone.coordY;
+    drone.currentPedidoId = pedido._id;
+    drone.status = "entregando";
+    await drone.save();
+
+    pedido.status = "em_transporte";
+    await pedido.save();
+
+    // inicia a simulação automática (loop no backend) apenas se ainda não houver uma ativa para esse drone
+    if (!activeSimulations.has(String(droneId))) {
+      simulateFlight(String(droneId));
+    } else {
+      console.log(`Simulação já ativa para drone ${droneId}, não criando uma nova.`);
+    }
+
+    return res.status(200).json({
+      message: "Voo iniciado com sucesso",
+      drone: { id: drone._id, status: drone.status },
+      pedido: { id: pedido._id, status: pedido.status },
+    });
+  } catch (error) {
+    console.error("Erro startFlight:", error);
+    return res
+      .status(500)
+      .json({ error: "Erro ao iniciar voo, contate o suporte" });
+  }
 }
 
+
+function simulateFlight(droneId) {
+  if (activeSimulations.has(String(droneId))) return;
+
+  const interval = setInterval(async () => {
+    try {
+      const drone = await DroneModel.findById(droneId).lean();
+      if (!drone) {
+        clearInterval(interval);
+        activeSimulations.delete(String(droneId));
+        return;
+      }
+
+      const status = drone.status;
+      let targetX = null;
+      let targetY = null;
+      let pedido = null;
+      let fila = null;
+
+      if (status === "entregando") {
+        // usa currentPedidoId quando disponível (trava do startFlight)
+        if (drone.currentPedidoId) {
+          pedido = await PedidoModel.findById(drone.currentPedidoId);
+        }
+        if (!pedido) {
+          // fallback: pega da fila associada a este droneId (passando string é OK)
+          fila = await FilaModel.findOne({ droneId }).populate("pedidos");
+          if (!fila || fila.pedidos.length === 0) {
+            await DroneModel.findByIdAndUpdate(droneId, { status: "retornando" });
+            return;
+          }
+          pedido = fila.pedidos[0];
+        }
+
+        targetX = parseFloat(pedido.enderecoDestino.coordX) || 0;
+        targetY = parseFloat(pedido.enderecoDestino.coordY) || 0;
+      } else if (status === "retornando") {
+        targetX = parseFloat(drone.homeCoordX) || 0;
+        targetY = parseFloat(drone.homeCoordY) || 0;
+      } else {
+        clearInterval(interval);
+        activeSimulations.delete(String(droneId));
+        return;
+      }
+
+      let droneX = parseFloat(drone.coordX) || 0;
+      let droneY = parseFloat(drone.coordY) || 0;
+      let battery = typeof drone.porcentagemBateria === "number"
+        ? drone.porcentagemBateria
+        : (drone.porcentagemBateria ? parseFloat(drone.porcentagemBateria) : 100);
+
+      const speedPer10Sec = 0.5;
+      const speedDegrees = speedPer10Sec / 111;
+
+      if (battery <= 0) {
+        clearInterval(interval);
+        activeSimulations.delete(String(droneId));
+        console.log(`Drone ${droneId} ficou sem bateria!`);
+        return;
+      }
+
+      const deltaX = targetX - droneX;
+      const deltaY = targetY - droneY;
+      const distance = Math.sqrt(deltaX ** 2 + deltaY ** 2);
+
+      if (distance === 0 || distance <= speedDegrees) {
+        droneX = targetX;
+        droneY = targetY;
+
+        if (status === "entregando") {
+          battery = Math.max(0, battery - 5);
+
+          await DroneModel.findByIdAndUpdate(droneId, {
+            coordX: droneX,
+            coordY: droneY,
+            porcentagemBateria: battery,
+            status: "retornando",
+            currentPedidoId: null,
+          });
+
+          if (pedido) {
+            pedido.status = "entregue";
+            await pedido.save();
+          }
+
+          fila = await FilaModel.findOne({ droneId }).populate("pedidos");
+          if (fila && fila.pedidos.length) {
+            fila.pedidos.shift();
+            await fila.save();
+          }
+
+          console.log(`Drone ${droneId} entregou pedido ${pedido?._id} — iniciando retorno à base.`);
+          return;
+        } else if (status === "retornando") {
+          fila = await FilaModel.findOne({ droneId }).populate("pedidos");
+          const hasPending = fila && fila.pedidos && fila.pedidos.length > 0;
+
+          await DroneModel.findByIdAndUpdate(droneId, {
+            coordX: droneX,
+            coordY: droneY,
+            porcentagemBateria: battery,
+            status: hasPending ? "reservado" : "disponivel",
+          });
+
+          console.log(`Drone ${droneId} chegou à base. Pedidos pendentes: ${hasPending ? fila.pedidos.length : 0}.`);
+          clearInterval(interval);
+          activeSimulations.delete(String(droneId));
+          return;
+        }
+      }
+
+      if (distance > 0) {
+        const moveRatio = speedDegrees / distance;
+        const moveX = deltaX * moveRatio;
+        const moveY = deltaY * moveRatio;
+
+        droneX += moveX;
+        droneY += moveY;
+        battery = Math.max(0, battery - 1);
+
+        await DroneModel.findByIdAndUpdate(droneId, {
+          coordX: droneX,
+          coordY: droneY,
+          porcentagemBateria: battery,
+        });
+
+        console.log(
+          `Drone ${droneId} voando (${status}) — X:${droneX.toFixed(6)} Y:${droneY.toFixed(6)} Bat:${battery}%`
+        );
+      }
+    } catch (err) {
+      console.error("Erro na simulação de voo:", err);
+      clearInterval(interval);
+      activeSimulations.delete(String(droneId));
+    }
+  }, 10000);
+
+  activeSimulations.set(String(droneId), interval);
+}
 
 
 module.exports = {
