@@ -113,11 +113,6 @@ async function deleteDrone(req, res) {
 }
 
 
-
-
-
-
-
 async function updateStatusDrone(req, res) {
   try {
     const id = req.params.id
@@ -147,10 +142,6 @@ async function updateStatusDrone(req, res) {
   }
 }
 
-
-// no topo do arquivo certifique-se de ter:
-// const mongoose = require("mongoose");
-// const activeSimulations = new Map();
 const activeSimulations = new Map();
 
 async function startFlight(req, res) {
@@ -161,7 +152,6 @@ async function startFlight(req, res) {
       return res.status(400).json({ error: "Id do drone não encontrado" });
     }
 
-    // valida id
     if (!mongoose.Types.ObjectId.isValid(droneId)) {
       return res.status(400).json({ error: "ID do drone inválido" });
     }
@@ -177,7 +167,7 @@ async function startFlight(req, res) {
         .json({ error: `Drone com status ${drone.status} não pode iniciar voo` });
     }
 
-    // buscar a fila e verificar pedidos — passamos a string droneId, Mongoose faz o cast
+    // buscar a fila e verificar pedidos
     const fila = await FilaModel.findOne({ droneId }).populate("pedidos");
     if (!fila || fila.pedidos.length === 0) {
       return res
@@ -187,7 +177,6 @@ async function startFlight(req, res) {
 
     const pedido = fila.pedidos[0];
 
-    // salva as coordenadas atuais como "base" e qual pedido está sendo entregue
     drone.homeCoordX = drone.coordX;
     drone.homeCoordY = drone.coordY;
     drone.currentPedidoId = pedido._id;
@@ -197,7 +186,7 @@ async function startFlight(req, res) {
     pedido.status = "em_transporte";
     await pedido.save();
 
-    // inicia a simulação automática (loop no backend) apenas se ainda não houver uma ativa para esse drone
+    // inicia a simulação
     if (!activeSimulations.has(String(droneId))) {
       simulateFlight(String(droneId));
     } else {
@@ -237,12 +226,10 @@ function simulateFlight(droneId) {
       let fila = null;
 
       if (status === "entregando") {
-        // usa currentPedidoId quando disponível (trava do startFlight)
         if (drone.currentPedidoId) {
           pedido = await PedidoModel.findById(drone.currentPedidoId);
         }
         if (!pedido) {
-          // fallback: pega da fila associada a este droneId (passando string é OK)
           fila = await FilaModel.findOne({ droneId }).populate("pedidos");
           if (!fila || fila.pedidos.length === 0) {
             await DroneModel.findByIdAndUpdate(droneId, { status: "retornando" });

@@ -8,10 +8,12 @@ const {
   updateStatusDrone,
   startFlight,
 } = require("../controllers/droneController");
+const { droneValidation } = require("../middlewares/droneMiddleware");
+const validate = require("../middlewares/handleValidate");
 
 const router = express.Router();
 
-router.post("/", createDrone);
+router.post("/", droneValidation(), validate, createDrone);
 router.get("/", getAllDrones);
 router.get("/:id", getDroneById);
 router.delete("/:id", deleteDrone);
