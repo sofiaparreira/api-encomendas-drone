@@ -125,28 +125,17 @@ async function createPedido(req, res) {
 
 async function getPedidosPendentes(req, res) {
   try {
-    const pedidos = await PedidoModel.aggregate([
-      { $match: { status: "pendente" } },
-      {
-        $lookup: {
-          from: "prioridades",
-          localField: "prioridadeId",
-          foreignField: "_id",
-          as: "prioridadeId"
-        }
-      },
-      { $unwind: "$prioridadeId" },
-      {
-        $lookup: {
-          from: "drones",
-          localField: "droneId",
-          foreignField: "_id",
-          as: "droneId"
-        }
-      },
-      { $unwind: "$droneId" },
-      { $sort: { "prioridadeId.valor": 1, createdAt: 1 } }
-    ]);
+    let pedidos = await PedidoModel.find({ status: "pendente" })
+      .populate("prioridadeId")
+      .populate("droneId")
+      .lean();
+
+    pedidos.sort((a, b) => {
+      const priA = Number(a.prioridadeId?.valor ?? Infinity);
+      const priB = Number(b.prioridadeId?.valor ?? Infinity);
+      if (priA !== priB) return priA - priB;
+      return new Date(a.createdAt) - new Date(b.createdAt); 
+    });
 
     return res.status(200).json(pedidos);
   } catch (error) {
@@ -154,6 +143,7 @@ async function getPedidosPendentes(req, res) {
     return res.status(500).json({ error: "Erro ao buscar pedidos, contate o suporte" });
   }
 }
+
 
 
 async function getPedidosTransporte(req, res) {
