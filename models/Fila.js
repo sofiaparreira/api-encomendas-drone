@@ -3,10 +3,12 @@ const { Schema } = mongoose;
 
 const filaSchema = new Schema({
     droneId: { type: Schema.Types.ObjectId, ref: "Drone", required: true},
-    pedidos: [{
-        type: Schema.Types.ObjectId,
-        ref: "Pedido"
-    }],
+    entregas: [{ type: Schema.Types.ObjectId, ref: 'Entrega' }],
+
+    // pedidos: [{
+    //     type: Schema.Types.ObjectId,
+    //     ref: "Pedido"
+    // }],
 
     status: {
         type: String,

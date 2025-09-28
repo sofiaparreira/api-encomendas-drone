@@ -1,65 +1,127 @@
 const { Drone } = require("../models/Drone");
 const { Pedido: PedidoModel, Pedido } = require("../models/Pedido");
-const { selecionarMelhorDroneParaPedido } = require("../utils/selecionarMelhorDroneParaPedido");
+const { selecionarMelhorDroneParaPedido, parseNumberSafe } = require("../utils/selecionarMelhorDroneParaPedido");
 const { Fila: FilaModel, Fila } = require("../models/Fila");
+const { Entrega: EntregaModel, Entrega } = require("../models/Entrega");
+
 
 async function createPedido(req, res) {
   try {
     const body = req.body;
 
-    // validação básica de coordenadas
     if (
       !body.enderecoDestino ||
       typeof body.enderecoDestino.coordX === "undefined" ||
       typeof body.enderecoDestino.coordY === "undefined"
     ) {
-      return res.status(400).json({ error: "enderecoDestino.coordX e coordY são obrigatórios" });
+      return res
+        .status(400)
+        .json({ error: "enderecoDestino.coordX e coordY são obrigatórios" });
     }
 
     const { coordX, coordY } = body.enderecoDestino;
-    const pesoKg = body.pesoKg;
-    const prioridade = body.prioridadeId; 
+    const pesoKg = parseNumberSafe(body.pesoKg);
+    if (Number.isNaN(pesoKg) || pesoKg <= 0) {
+      return res.status(400).json({ error: "pesoKg inválido" });
+    }
 
-    const melhorDrone = await selecionarMelhorDroneParaPedido({ coordX, coordY, pesoKg, prioridade });
+    const prioridade = body.prioridadeId;
+
+    // Seleciona o melhor drone que ainda possa carregar este pedido
+    const melhorDrone = await selecionarMelhorDroneParaPedido({
+      coordX,
+      coordY,
+      pesoKg,
+      prioridade,
+    });
 
     if (!melhorDrone) {
-      return res.status(400).json({ error: "Nenhum drone disponível que atenda aos requisitos do pedido" });
+      return res.status(400).json({
+        error: "Nenhum drone disponível com capacidade suficiente para este pedido",
+      });
+    }
+
+    // Checa se existe uma entrega agendada que consiga comportar o peso
+    let entrega = await Entrega.findOne({
+      drone: melhorDrone._id,
+      status: "agendada",
+      capacidadeRestante: { $gte: pesoKg }, // aqui garante que não ultrapasse capacidade
+    });
+
+    if (!entrega) {
+      // Nenhuma entrega existente comporta o pedido, cria nova se ainda couber
+      if (pesoKg > melhorDrone.capacidadeMaxKg) {
+        return res.status(400).json({
+          error: `Pedido excede a capacidade máxima do drone (${melhorDrone.capacidadeMaxKg} kg)`,
+        });
+      }
+      entrega = await Entrega.create({
+        drone: melhorDrone._id,
+        pedidos: [],
+        totalPeso: 0,
+        capacidadeRestante: melhorDrone.capacidadeMaxKg,
+        droneMaxPayloadSnapshot: melhorDrone.capacidadeMaxKg,
+        status: "agendada",
+        scheduledAt: new Date(),
+      });
+    }
+
+    // Adiciona pedido à entrega
+    if (pesoKg > entrega.capacidadeRestante) {
+      return res.status(400).json({
+        error: "Não há capacidade suficiente nesta entrega para adicionar o pedido",
+      });
     }
 
     const pedido = await Pedido.create({
       ...body,
-      droneId: melhorDrone._id
+      droneId: melhorDrone._id,
     });
 
+    entrega.pedidos.push(pedido._id);
+    entrega.totalPeso += pesoKg;
+    entrega.capacidadeRestante -= pesoKg;
+    await entrega.save();
+
+    // Atualiza fila
+    let fila = await FilaModel.findOne({ droneId: melhorDrone._id });
+    if (fila) {
+      if (!fila.entregas.includes(entrega._id)) {
+        fila.entregas.push(entrega._id);
+        await fila.save();
+      }
+    } else {
+      await FilaModel.create({
+        droneId: melhorDrone._id,
+        entregas: [entrega._id],
+        status: "aguardando",
+      });
+    }
+
+    // Se drone estava disponível, muda para reservado
     if (melhorDrone.status === "disponivel") {
       await Drone.findByIdAndUpdate(melhorDrone._id, { status: "reservado" });
     }
 
-    let fila = await FilaModel.findOne({ droneId: melhorDrone._id });
-    if (fila) {
-      fila.pedidos.push(pedido._id);
-      await fila.save();
-    } else {
-      await FilaModel.create({ droneId: melhorDrone._id, pedidos: [pedido._id], status: "aguardando" });
-    }
-
     return res.status(201).json({
-      message: "Pedido criado com sucesso e drone atribuído à fila",
+      message: "Pedido criado com sucesso e atribuído a uma entrega",
       pedido,
+      entrega,
       drone: {
         id: melhorDrone._id,
         nome: melhorDrone.nome,
         capacidadeMaxKg: melhorDrone.capacidadeMaxKg,
-        coordX: melhorDrone.coordX,
-        coordY: melhorDrone.coordY,
-        distanciaAoDestino: melhorDrone._distanciaAoDestino ?? null
-      }
+      },
     });
+
   } catch (err) {
     console.error("Erro createPedido:", err);
-    return res.status(500).json({ error: "Erro ao solicitar pedido, entre em contato com o suporte" });
+    return res
+      .status(500)
+      .json({ error: "Erro ao solicitar pedido, entre em contato com o suporte" });
   }
 }
+
 
 async function getPedidosPendentes(req, res) {
   try {

@@ -1,5 +1,9 @@
-const { Drone } = require("../models/Drone");
+const { Drone: DroneModel, Drone } = require("../models/Drone");
 const { Fila: FilaModel, Fila } = require("../models/Fila");
+const { Entrega: EntregaModel, Entrega } = require("../models/Entrega");
+const { Pedido: PedidoModel, Pedido } = require("../models/Pedido");
+
+
 
 function parseNumberSafe(v) {
   if (v === undefined || v === null) return NaN;
@@ -35,50 +39,106 @@ async function selecionarMelhorDroneParaPedido({ coordX, coordY, pesoKg, priorid
   if (Number.isNaN(peso)) throw new Error("pesoKg inválido");
 
   // Buscar drones disponíveis ou reservados
-  let candidatos = await Drone.find({
+  let candidatos = await DroneModel.find({
     status: { $in: ["disponivel", "reservado"] },
     capacidadeMaxKg: { $gte: peso }
   }).lean();
 
   if (!candidatos.length) return null;
 
-  const filas = await FilaModel.find({ droneId: { $in: candidatos.map(d => d._id) } }).populate("pedidos");
+  // Pega filas associadas aos drones candidatos (sem popular pedidos)
+  const filas = await FilaModel.find({
+    droneId: { $in: candidatos.map(d => d._id) }
+  }).lean();
 
+  // Para cada fila, precisamos calcular:
+  // - filaLength: soma de todos os pedidos presentes nas entregas da fila
+  // - filaLastPedidoCreatedAt: createdAt do pedido mais recente entre todas as entregas da fila
+  // Fazemos isso em paralelo para cada fila
+  const filaMetricsByDroneId = {}; // chave: droneId.toString()
+
+  await Promise.all(filas.map(async fila => {
+    const droneIdStr = String(fila.droneId);
+    const entregasIds = Array.isArray(fila.entregas) ? fila.entregas : [];
+
+    if (entregasIds.length === 0) {
+      filaMetricsByDroneId[droneIdStr] = { filaLength: 0, filaLastPedidoCreatedAt: null };
+      return;
+    }
+
+    // Pega entregas para extrair os pedidos (cada entrega tem array de ObjectId em `pedidos`)
+    const entregas = await EntregaModel.find({ _id: { $in: entregasIds } })
+      .select("pedidos")
+      .lean();
+
+    // junta todos os pedidoIds
+    const allPedidoIds = entregas.reduce((acc, e) => {
+      if (Array.isArray(e.pedidos) && e.pedidos.length) acc.push(...e.pedidos);
+      return acc;
+    }, []);
+
+    const filaLength = allPedidoIds.length;
+
+    let filaLastPedidoCreatedAt = null;
+    if (allPedidoIds.length > 0) {
+      // pega o pedido mais recente (por createdAt) entre os pedidos coletados
+      const lastPedido = await PedidoModel.find({ _id: { $in: allPedidoIds } })
+        .sort({ createdAt: -1 })
+        .limit(1)
+        .select("createdAt")
+        .lean();
+
+      filaLastPedidoCreatedAt = lastPedido && lastPedido.length ? lastPedido[0].createdAt : null;
+    }
+
+    filaMetricsByDroneId[droneIdStr] = { filaLength, filaLastPedidoCreatedAt };
+  }));
+
+  // Anexa métricas aos candidatos
   candidatos = candidatos.map(d => {
-    const fila = filas.find(f => f.droneId.toString() === d._id.toString());
+    const key = String(d._id);
+    const metrics = filaMetricsByDroneId[key] || { filaLength: 0, filaLastPedidoCreatedAt: null };
     return {
       ...d,
-      filaLength: fila ? fila.pedidos.length : 0,
-      filaLastPedidoCreatedAt: fila && fila.pedidos.length ? fila.pedidos[fila.pedidos.length - 1].createdAt : null
+      filaLength: metrics.filaLength,
+      filaLastPedidoCreatedAt: metrics.filaLastPedidoCreatedAt
     };
   });
 
+  // Ordena por tamanho da fila (asc)
   candidatos.sort((a, b) => a.filaLength - b.filaLength);
 
-  let minFila = candidatos[0].filaLength;
+  // pega os que têm menor fila
+  const minFila = candidatos[0].filaLength;
   let empatesFila = candidatos.filter(d => d.filaLength === minFila);
 
+  // desempata pelo tempo do último pedido (mais antigo primeiro)
   if (empatesFila.length > 1) {
     empatesFila.sort((a, b) => {
       const aTime = a.filaLastPedidoCreatedAt ? new Date(a.filaLastPedidoCreatedAt).getTime() : 0;
       const bTime = b.filaLastPedidoCreatedAt ? new Date(b.filaLastPedidoCreatedAt).getTime() : 0;
-      return aTime - bTime; 
+      return aTime - bTime;
     });
   }
 
+  // se ainda houver empate, desempata pela distância ao destino
   if (empatesFila.length > 1) {
-    empatesFila.forEach(d => {
+    empatesFila = empatesFila.map(d => {
       const lat = parseNumberSafe(d.coordX);
       const lon = parseNumberSafe(d.coordY);
-      d._distanciaKm = Number.isNaN(lat) || Number.isNaN(lon)
+      const distanciaKm = (Number.isNaN(lat) || Number.isNaN(lon))
         ? Infinity
         : calcularDistanciaKm(destinoLat, destinoLon, lat, lon);
+      return { ...d, _distanciaKm: distanciaKm };
     });
+
     empatesFila.sort((a, b) => a._distanciaKm - b._distanciaKm);
   }
 
-  return empatesFila[0];
+  // retorna o melhor candidato (ou null se não existir)
+  return empatesFila.length ? empatesFila[0] : null;
 }
+
 module.exports = {
   selecionarMelhorDroneParaPedido,
   calcularDistanciaKm,
