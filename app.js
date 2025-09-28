@@ -3,7 +3,7 @@ const cors = require("cors");
 require("dotenv").config();
 const http = require("http");
 
-const { startWebSocket } = require("./utils/wsServer"); // importa a função que inicializa o WS
+const { startWebSocket } = require("./utils/wsServer");
 
 const app = express();
 

@@ -19,7 +19,7 @@ router.get("/:id", getDroneById);
 router.delete("/:id", deleteDrone);
 router.patch("/status/:id", updateStatusDrone);
 router.post("/start-flight/:id", startFlight); 
-router.patch("/recharge/:id", startFlight); 
+router.patch("/recharge/:id", rechargeBattery); 
 
 
 module.exports = router;

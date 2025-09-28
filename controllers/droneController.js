@@ -351,30 +351,21 @@ async function simulateFlight(droneId) {
 const activeRecharges = new Map();
 
 async function rechargeBattery(req, res) {
-
   try {
     const droneId = req.params.id;
 
-    if (!droneId) {
-      return res.status(400).json({ error: "ID do drone não fornecido" });
-    }
-
-    if (!mongoose.Types.ObjectId.isValid(droneId)) {
-      return res.status(400).json({ error: "ID do drone inválido" });
-    }
+    if (!droneId) return res.status(400).json({ error: "ID do drone não fornecido" });
+    if (!mongoose.Types.ObjectId.isValid(droneId)) return res.status(400).json({ error: "ID do drone inválido" });
 
     const drone = await DroneModel.findById(droneId);
-    if (!drone) {
-      return res.status(404).json({ error: "Drone não encontrado" });
-    }
+    if (!drone) return res.status(404).json({ error: "Drone não encontrado" });
 
     // só permite carregar quando status for disponivel ou reservado
     if (!["disponivel", "reservado"].includes(drone.status)) {
-      return res.status(400).json({
-        error: `Drone com status "${drone.status}" não pode recarregar agora`
-      });
+      return res.status(400).json({ error: `Drone com status "${drone.status}" não pode recarregar agora` });
     }
 
+    // já recarregando?
     if (activeRecharges.has(droneId)) {
       return res.status(400).json({ error: "Recarga já está em andamento para este drone" });
     }
@@ -387,19 +378,29 @@ async function rechargeBattery(req, res) {
       try {
         battery = Math.min(100, battery + 5);
 
-        await DroneModel.findByIdAndUpdate(droneId, { porcentagemBateria: battery });
+        const updatedDrone = await DroneModel.findByIdAndUpdate(
+          droneId,
+          { porcentagemBateria: battery },
+          { new: true } // retorna documento atualizado
+        );
 
+        broadcastDronePosition(updatedDrone); // envia atualização via WebSocket
         console.log(`Drone ${droneId} recarregando... ${battery}%`);
 
         if (battery >= 100) {
           clearInterval(interval);
           activeRecharges.delete(droneId);
 
+          // Checa fila para definir status final
           const fila = await FilaModel.findOne({ droneId }).populate("pedidos");
           const statusFinal = fila && fila.pedidos.length > 0 ? "reservado" : "disponivel";
 
           await DroneModel.findByIdAndUpdate(droneId, { status: statusFinal });
           console.log(`Drone ${droneId} totalmente recarregado, status: ${statusFinal}`);
+
+          // Envia atualização final via WebSocket
+          const finalDrone = await DroneModel.findById(droneId);
+          broadcastDronePosition(finalDrone);
         }
       } catch (err) {
         console.error(`Erro recarregando drone ${droneId}:`, err);
