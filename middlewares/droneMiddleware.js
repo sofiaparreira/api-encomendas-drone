@@ -6,6 +6,7 @@ const droneValidation = () => {
             .isString().withMessage("Nome inválido")
             .notEmpty().withMessage("O campo 'nome' é obrigatório")
             .isLength({ min: 2, max: 20 }).withMessage("O campo 'nome' deve ter entre 2 e 20 caracteres"),
+
         body("capacidadeMaxKg")
             .isNumeric().withMessage("Capacidade deve ser um número")
             .notEmpty().withMessage("O campo 'capacidade máxima' é obrigatório")
@@ -20,20 +21,34 @@ const droneValidation = () => {
             .isNumeric().withMessage("Porcentagem da bateria deve ser um número")
             .notEmpty().withMessage("O campo 'porcentagem da bateria' é obrigatório")
             .isInt({ min: 1, max: 100}).withMessage("O campo 'porcentagem da bateria' deve ser entre 1 e 100"),
-        body("coordX").notEmpty(),
-        body("coordY").notEmpty(),
+
+        body("coordX")
+            .notEmpty().withMessage("O campo 'coordX' é obrigatório")
+            .isFloat().withMessage("coordX deve ser um número"),
+
+        body("coordY")
+            .notEmpty().withMessage("O campo 'coordY' é obrigatório")
+            .isFloat().withMessage("coordY deve ser um número"),
+
+        body("homeCoordX")
+            .optional()
+            .isFloat().withMessage("homeCoordX deve ser um número"),
+        body("homeCoordY")
+            .optional()
+            .isFloat().withMessage("homeCoordY deve ser um número"),
 
         body("status")
             .optional()
             .isIn(['disponivel', 'carregando', 'entregando', 'retornando', 'manutencao', 'reservado'])
             .withMessage("Status inválido"),
+
         body("velocidadeKMH")
             .isNumeric().withMessage("Velocidade máxima deve ser um número")
             .notEmpty().withMessage("O campo 'velocidade máxima' é obrigatório")
             .isInt({min: 30, max: 100}).withMessage("O campo 'velocidade máxima' deve ser entre 30km/h e 100km/h"),
 
         body("tempoVooMax").optional()
-    ]
+    ];
 };
 
 module.exports = { droneValidation };

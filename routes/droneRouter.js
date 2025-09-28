@@ -6,6 +6,7 @@ const {
   getDroneById,
   updateStatusDrone,
   startFlight,
+  rechargeBattery
 } = require("../controllers/droneController");
 const { droneValidation } = require("../middlewares/droneMiddleware");
 const validate = require("../middlewares/handleValidate");
@@ -18,5 +19,7 @@ router.get("/:id", getDroneById);
 router.delete("/:id", deleteDrone);
 router.patch("/status/:id", updateStatusDrone);
 router.post("/start-flight/:id", startFlight); 
+router.patch("/recharge/:id", startFlight); 
+
 
 module.exports = router;
