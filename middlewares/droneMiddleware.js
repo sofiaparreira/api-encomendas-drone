@@ -1,6 +1,6 @@
-import { body } from "express-validator"
+const { body } = require("express-validator");
 
-export const droneValidation = () => {
+const droneValidation = () => {
     return [
         body("nome")
             .isString().withMessage("Nome inválido")
@@ -20,13 +20,11 @@ export const droneValidation = () => {
             .isNumeric().withMessage("Porcentagem da bateria deve ser um número")
             .notEmpty().withMessage("O campo 'porcentagem da bateria' é obrigatório")
             .isInt({ min: 1, max: 100}).withMessage("O campo 'porcentagem da bateria' deve ser entre 1 e 100"),
-        body("coordX")
-            .notEmpty(),
-        body("coordY")
-            .notEmpty(),
+        body("coordX").notEmpty(),
+        body("coordY").notEmpty(),
 
         body("status")
-            .optional() // para vim o valor default
+            .optional()
             .isIn(['disponivel', 'carregando', 'entregando', 'retornando', 'manutencao', 'reservado'])
             .withMessage("Status inválido"),
         body("velocidadeKMH")
@@ -34,8 +32,8 @@ export const droneValidation = () => {
             .notEmpty().withMessage("O campo 'velocidade máxima' é obrigatório")
             .isInt({min: 30, max: 100}).withMessage("O campo 'velocidade máxima' deve ser entre 30km/h e 100km/h"),
 
-        body("tempoVooMax")
-            .optional()
-
+        body("tempoVooMax").optional()
     ]
-}
+};
+
+module.exports = { droneValidation };

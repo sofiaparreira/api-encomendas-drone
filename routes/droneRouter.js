@@ -1,4 +1,3 @@
-// routes/router.js
 const express = require("express");
 const {
   createDrone,

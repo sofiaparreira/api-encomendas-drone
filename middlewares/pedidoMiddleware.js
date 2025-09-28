@@ -1,6 +1,6 @@
-import { body } from "express-validator"
+const { body } = require("express-validator");
 
-export const pedidoValidation = () => {
+const pedidoValidation = () => {
     return [
         body("enderecoDestino.rua")
             .notEmpty().withMessage("O campo 'rua' é obrigatório")
@@ -36,7 +36,7 @@ export const pedidoValidation = () => {
 
         body("pesoKg")
             .notEmpty().withMessage("O campo 'peso' é obrigatório")
-    .isFloat({ min: 0.1, max: 50 }).withMessage("O campo 'peso' deve ser entre 0.1kg e 50kg"),
+            .isFloat({ min: 0.1, max: 50 }).withMessage("O campo 'peso' deve ser entre 0.1kg e 50kg"),
 
         body("status")
             .optional()
@@ -46,8 +46,7 @@ export const pedidoValidation = () => {
         body("prioridadeId")
             .notEmpty().withMessage("O campo 'prioridadeId' é obrigatório")
             .isMongoId().withMessage("ID de prioridade inválido"),
-
-       
     ];
 };
 
+module.exports = { pedidoValidation };
