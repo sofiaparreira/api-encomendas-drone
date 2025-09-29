@@ -305,162 +305,153 @@ async function startFlight(req, res) {
 
 // --- rota de simulacao de voo --- 
 
+// --- rota de simulacao de voo --- 
 async function simulateFlight(droneId) {
-  if (activeSimulations.has(String(droneId))) {
-    console.log(`[SIMULATE_FLIGHT] Simulação já ativa para drone ${droneId}`);
-    return;
-  }
-
-  console.log(`[SIMULATE_FLIGHT] Iniciando simulação para drone ${droneId}`);
-
-  let currentEntrega = null;
-  let currentPedidoIndex = 0;
-  let currentPedido = null;
-
-  const stepInterval = 4000; 
-  const stepSize = 1;        
+  if (activeSimulations.has(String(droneId))) return;
 
   const interval = setInterval(async () => {
     try {
       const drone = await DroneModel.findById(droneId);
       if (!drone) {
-        console.log(`❌ [SIMULATE_FLIGHT] Drone ${droneId} não encontrado`);
         clearInterval(interval);
         activeSimulations.delete(String(droneId));
         return;
       }
 
-      let { coordX: droneX, coordY: droneY, homeCoordX: homeX, homeCoordY: homeY, porcentagemBateria: battery, status } = drone;
-      droneX = Number(droneX ?? 0);
-      droneY = Number(droneY ?? 0);
-      homeX = Number(homeX ?? 0);
-      homeY = Number(homeY ?? 0);
-      battery = Number(battery ?? 100);
+      let status = drone.status;
+      const homeX = Number(drone.homeCoordX ?? 0);
+      const homeY = Number(drone.homeCoordY ?? 0);
+      let droneX = Number(drone.coordX ?? 0);
+      let droneY = Number(drone.coordY ?? 0);
+      let battery = Number(drone.porcentagemBateria ?? 100);
 
-      let targetX = droneX;
-      let targetY = droneY;
+      let targetX = homeX;
+      let targetY = homeY;
+      let pedido = null;
+      let currentEntrega = null;
 
       if (status === "entregando") {
-        if (!currentEntrega) {
+        if (drone.currentPedidoId) {
+          pedido = await PedidoModel.findById(drone.currentPedidoId);
+        }
+
+        if (!pedido) {
           const fila = await FilaModel.findOne({ droneId }).populate({
             path: "entregas",
             populate: { path: "pedidos" }
           });
-          if (!fila || fila.entregas.length === 0) {
-            console.log(`❌ [SIMULATE_FLIGHT] Nenhuma entrega, iniciando retorno`);
-            await DroneModel.findByIdAndUpdate(droneId, { status: "retornando" });
-            return;
-          }
-          currentEntrega = fila.entregas[0];
-          currentPedidoIndex = 0;
-          currentPedido = currentEntrega.pedidos[currentPedidoIndex];
-          console.log(`📦 [SIMULATE_FLIGHT] Iniciando entrega ${currentEntrega._id}`);
-        }
 
-        if (!currentPedido) {
-          currentEntrega.status = "concluida";
-          currentEntrega.finishedAt = new Date();
-          await currentEntrega.save();
-          console.log(`✅ [SIMULATE_FLIGHT] Entrega ${currentEntrega._id} concluída`);
-
-          const fila = await FilaModel.findOne({ droneId });
-          if (fila) {
-            fila.entregas.shift();
-            await fila.save();
+          if (fila && fila.entregas.length > 0) {
+            currentEntrega = fila.entregas[0];
+            if (currentEntrega.pedidos && currentEntrega.pedidos.length > 0) {
+              pedido = currentEntrega.pedidos[0];
+            }
           }
 
-          const filaAtualizada = await FilaModel.findOne({ droneId }).populate({
-            path: "entregas",
-            populate: { path: "pedidos" }
-          });
-
-          if (filaAtualizada && filaAtualizada.entregas.length > 0) {
-            currentEntrega = filaAtualizada.entregas[0];
-            currentPedidoIndex = 0;
-            currentPedido = currentEntrega.pedidos[currentPedidoIndex];
-          } else {
-            currentEntrega = null;
-            currentPedido = null;
-            await DroneModel.findByIdAndUpdate(droneId, { status: "retornando" });
+          if (!pedido) {
+            await DroneModel.findByIdAndUpdate(droneId, { status: "retornando", currentPedidoId: null });
             return;
           }
         }
 
-        if (currentPedido) {
-          targetX = Number(currentPedido.enderecoDestino.coordX ?? droneX);
-          targetY = Number(currentPedido.enderecoDestino.coordY ?? droneY);
-        }
+        targetX = Number(pedido.enderecoDestino.coordX ?? 0);
+        targetY = Number(pedido.enderecoDestino.coordY ?? 0);
 
       } else if (status === "retornando") {
         targetX = homeX;
         targetY = homeY;
       } else {
-        console.log(`[SIMULATE_FLIGHT] Status inválido: ${status}`);
         clearInterval(interval);
         activeSimulations.delete(String(droneId));
         return;
       }
 
+      if (battery <= 20 && status !== "retornando") {
+        console.log(`Drone ${droneId} iniciando retorno de emergência por bateria baixa (${battery}%)`);
+        targetX = homeX;
+        targetY = homeY;
+        status = "retornando";
+      }
+
+      const stepSize = 1;
       const deltaX = targetX - droneX;
       const deltaY = targetY - droneY;
+      const distance = Math.sqrt(deltaX ** 2 + deltaY ** 2);
 
-      let moveX = 0;
-      let moveY = 0;
+      if (battery <= 0) {
+        console.log(`Drone ${droneId} ficou sem bateria!`);
+        clearInterval(interval);
+        activeSimulations.delete(String(droneId));
+        return;
+      }
 
-      if (Math.abs(deltaX) >= 1) moveX = deltaX > 0 ? 1 : -1;
-      else moveX = deltaX;
+      if (distance > 0) {
+        const moveRatio = Math.min(stepSize / distance, 1); 
+        droneX += deltaX * moveRatio;
+        droneY += deltaY * moveRatio;
 
-      if (Math.abs(deltaY) >= 1) moveY = deltaY > 0 ? 1 : -1;
-      else moveY = deltaY;
+        if ((deltaX > 0 && droneX > targetX) || (deltaX < 0 && droneX < targetX)) droneX = targetX;
+        if ((deltaY > 0 && droneY > targetY) || (deltaY < 0 && droneY < targetY)) droneY = targetY;
+        battery = Math.max(0, battery - 1);
 
-      droneX += moveX;
-      droneY += moveY;
-
-      battery = Math.max(0, battery - 1);
+        await DroneModel.findByIdAndUpdate(droneId, {
+          coordX: droneX,
+          coordY: droneY,
+          porcentagemBateria: battery,
+          status,
+        });
+      }
 
       if (droneX === targetX && droneY === targetY) {
-        if (status === "entregando" && currentPedido) {
-          currentPedido.status = "entregue";
-          await currentPedido.save();
-          console.log(`[SIMULATE_FLIGHT] Pedido ${currentPedido._id} entregue`);
-          currentPedidoIndex++;
-          currentPedido = currentPedidoIndex < currentEntrega.pedidos.length
-            ? currentEntrega.pedidos[currentPedidoIndex]
-            : null;
-        } else if (status === "retornando" && droneX === homeX && droneY === homeY) {
-          console.log(`[SIMULATE_FLIGHT] Drone chegou em casa`);
-          status = "disponivel";
-          currentEntrega = null;
-          currentPedido = null;
+        if (status === "entregando" && pedido) {
+          pedido.status = "entregue";
+          await pedido.save();
+
+          if (currentEntrega && currentEntrega.pedidos.length > 0) {
+            currentEntrega.pedidos.shift();
+            await currentEntrega.save();
+          }
+
+          const fila = await FilaModel.findOne({ droneId }).populate({
+            path: "entregas",
+            populate: { path: "pedidos" }
+          });
+
+          if (fila && fila.entregas.length > 0) {
+            const firstEntrega = fila.entregas[0];
+            if (firstEntrega.pedidos.length > 0) {
+              drone.currentPedidoId = firstEntrega.pedidos[0]._id;
+              await DroneModel.findByIdAndUpdate(droneId, { currentPedidoId: drone.currentPedidoId });
+            } else {
+              fila.entregas.shift();
+              await fila.save();
+              if (fila.entregas.length === 0) {
+                await DroneModel.findByIdAndUpdate(droneId, { status: "retornando", currentPedidoId: null });
+              }
+            }
+          } else {
+            await DroneModel.findByIdAndUpdate(droneId, { status: "retornando", currentPedidoId: null });
+          }
+        } else if (status === "retornando") {
+          await DroneModel.findByIdAndUpdate(droneId, { status: "disponivel", currentPedidoId: null });
+          clearInterval(interval);
+          activeSimulations.delete(String(droneId));
         }
       }
 
-      await DroneModel.findByIdAndUpdate(droneId, {
-        coordX: droneX,
-        coordY: droneY,
-        porcentagemBateria: battery,
-        status
-      });
-
       const updatedDrone = await DroneModel.findById(droneId);
       broadcastDronePosition(updatedDrone);
-      console.log(`[SIMULATE_FLIGHT] Drone ${droneId} posicionado em (${droneX}, ${droneY})`);
 
-      if (status === "disponivel") {
-        clearInterval(interval);
-        activeSimulations.delete(String(droneId));
-        console.log(`🏁 [SIMULATE_FLIGHT] Simulação finalizada para drone ${droneId}`);
-      }
+      console.log(`Drone ${droneId} voando (${status}) — X:${droneX.toFixed(6)} Y:${droneY.toFixed(6)} Bat:${battery}%`);
 
     } catch (err) {
-      console.error("[SIMULATE_FLIGHT] Erro:", err);
+      console.error("Erro na simulação de voo:", err);
       clearInterval(interval);
       activeSimulations.delete(String(droneId));
     }
-  }, stepInterval);
+  }, 4000);
 
   activeSimulations.set(String(droneId), interval);
-  console.log(`🔄 [SIMULATE_FLIGHT] Intervalo configurado para drone ${droneId}`);
 }
 
 
@@ -520,17 +511,16 @@ async function rechargeBattery(req, res) {
           clearInterval(interval);
           activeRecharges.delete(idStr);
 
-          const fila = await FilaModel.findOne({ droneId }).lean();
-          let hasPending = false;
-
-          if (fila && Array.isArray(fila.entregas) && fila.entregas.length > 0) {
-            const pendingCount = await EntregaModel.countDocuments({
-              _id: { $in: fila.entregas },
-              status: "agendada"
-            });
-            hasPending = pendingCount > 0;
-            console.log(`🔍 [RECHARGE] Entregas pendentes: ${pendingCount}`);
+          const fila = await FilaModel.findOne({ droneId }).populate({
+            path: "entregas",
+            populate: { path: "pedidos" }
+          });
+          
+          if (fila && fila.entregas.length > 0) {
+            const currentEntrega = fila.entregas[0];
+            const currentPedido = currentEntrega.pedidos[0]; // ou o índice do pedido atual
           }
+          
 
           const statusFinal = hasPending ? "reservado" : "disponivel";
           console.log(`[RECHARGE] Status final: ${statusFinal}`);
