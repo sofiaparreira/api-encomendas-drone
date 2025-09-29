@@ -44,7 +44,6 @@ async function getAllDrones(req, res) {
 async function getDroneById(req, res) {
   try {
     const id = req.params.id;
-
     if (!id.match(/^[0-9a-fA-F]{24}$/)) {
       return res.status(400).json({ error: "ID inválido" });
     }
@@ -79,7 +78,6 @@ async function deleteDrone(req, res) {
     }
 
     const entregas = await EntregaModel.find({ drone: drone._id });
-
     for (const entrega of entregas) {
       const pedidos = await PedidoModel.find({ _id: { $in: entrega.pedidos } });
 
@@ -206,7 +204,7 @@ const activeSimulations = new Map();
 async function startFlight(req, res) {
   try {
     const droneId = req.params.id;
-    console.log(`🚁 [START_FLIGHT] Iniciando voo para drone ${droneId}`);
+    console.log(`[START_FLIGHT] Iniciando voo para drone ${droneId}`);
 
     if (!droneId) return res.status(400).json({ error: "Id do drone não encontrado" });
     if (!mongoose.Types.ObjectId.isValid(droneId)) return res.status(400).json({ error: "ID do drone inválido" });
@@ -261,13 +259,11 @@ async function startFlight(req, res) {
     drone.status = "entregando";
     await drone.save();
 
-    // Atualiza status da entrega e dos pedidos
     console.log(`[START_FLIGHT] Atualizando status da entrega para 'em_voo'`);
     entrega.status = "em_voo";
     entrega.startedAt = new Date();
     await entrega.save();
 
-    // Marca todos os pedidos da entrega como em transporte
     console.log(`[START_FLIGHT] Marcando ${entrega.pedidos.length} pedidos como 'em_transporte'`);
     for (const pedido of entrega.pedidos) {
       pedido.status = "em_transporte";
@@ -518,7 +514,7 @@ async function rechargeBattery(req, res) {
           
           if (fila && fila.entregas.length > 0) {
             const currentEntrega = fila.entregas[0];
-            const currentPedido = currentEntrega.pedidos[0]; // ou o índice do pedido atual
+            const currentPedido = currentEntrega.pedidos[0]; 
           }
           
 
