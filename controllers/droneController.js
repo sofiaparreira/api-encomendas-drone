@@ -24,7 +24,7 @@ async function createDrone(req, res) {
       .status(500)
       .json({ error: "Erro ao cadastrar drone, entre em contato com o suporte" });
   }
-  
+
 }
 
 
@@ -232,7 +232,7 @@ async function startFlight(req, res) {
         populate: { path: "prioridadeId", select: "nome valor" }
       }
     });
-    
+
     if (!fila || fila.entregas.length === 0) {
       console.log(`[START_FLIGHT] Nenhuma entrega encontrada na fila`);
       return res.status(400).json({ error: "Não há entregas na fila para iniciar voo" });
@@ -240,19 +240,17 @@ async function startFlight(req, res) {
 
     const entrega = fila.entregas[0];
     console.log(`📦 [START_FLIGHT] Primeira entrega: ${entrega._id} com ${entrega.pedidos.length} pedidos`);
-    
+
     if (!entrega.pedidos || entrega.pedidos.length === 0) {
       console.log(`[START_FLIGHT] Entrega sem pedidos`);
       return res.status(400).json({ error: "A entrega não possui pedidos" });
     }
 
-    // Log dos pedidos da entrega
     console.log(`[START_FLIGHT] Pedidos da entrega:`);
     entrega.pedidos.forEach((pedido, index) => {
       console.log(`   ${index + 1}. Pedido ${pedido._id} - Destino: (${pedido.enderecoDestino.coordX}, ${pedido.enderecoDestino.coordY})`);
     });
 
-    // Salva posição inicial do drone
     console.log(`[START_FLIGHT] Salvando posição inicial: (${drone.coordX}, ${drone.coordY})`);
     drone.homeCoordX = drone.coordX;
     drone.homeCoordY = drone.coordY;
@@ -270,7 +268,6 @@ async function startFlight(req, res) {
       await pedido.save();
     }
 
-    // Atualiza status da fila
     console.log(`[START_FLIGHT] Atualizando fila para 'voando'`);
     fila.status = "voando";
     await fila.save();
@@ -286,10 +283,10 @@ async function startFlight(req, res) {
     return res.status(200).json({
       message: "Voo iniciado com sucesso",
       drone: { id: drone._id, status: drone.status },
-      entrega: { 
-        id: entrega._id, 
+      entrega: {
+        id: entrega._id,
         status: entrega.status,
-        pedidosCount: entrega.pedidos.length 
+        pedidosCount: entrega.pedidos.length
       },
     });
   } catch (error) {
@@ -299,7 +296,6 @@ async function startFlight(req, res) {
 }
 
 
-// --- rota de simulacao de voo --- 
 
 // --- rota de simulacao de voo --- 
 async function simulateFlight(droneId) {
@@ -382,13 +378,12 @@ async function simulateFlight(droneId) {
       }
 
       if (distance > 0) {
-        const moveRatio = Math.min(stepSize / distance, 1); 
+        const moveRatio = Math.min(stepSize / distance, 1);
         droneX += deltaX * moveRatio;
         droneY += deltaY * moveRatio;
 
-        if ((deltaX > 0 && droneX > targetX) || (deltaX < 0 && droneX < targetX)) droneX = targetX;
-        if ((deltaY > 0 && droneY > targetY) || (deltaY < 0 && droneY < targetY)) droneY = targetY;
-        battery = Math.max(0, battery - 1);
+        const batteryConsumption = 5;
+        battery = Math.max(0, battery - batteryConsumption);
 
         await DroneModel.findByIdAndUpdate(droneId, {
           coordX: droneX,
@@ -458,7 +453,7 @@ async function rechargeBattery(req, res) {
   try {
     const droneId = req.params.id;
     console.log(`[RECHARGE] Iniciando recarga para drone ${droneId}`);
-    
+
     if (!droneId) return res.status(400).json({ error: "ID do drone não fornecido" });
     if (!mongoose.Types.ObjectId.isValid(droneId)) return res.status(400).json({ error: "ID do drone inválido" });
 
@@ -478,7 +473,7 @@ async function rechargeBattery(req, res) {
     }
 
     if (activeRecharges.has(idStr)) {
-      console.log(`⚠️ [RECHARGE] Recarga já está em andamento para drone ${droneId}`);
+      console.log(`[RECHARGE] Recarga já está em andamento para drone ${droneId}`);
       return res.status(400).json({ error: "Recarga já está em andamento para este drone" });
     }
 
@@ -499,8 +494,8 @@ async function rechargeBattery(req, res) {
           { new: true }
         );
 
-        broadcastDronePosition(updatedDrone); 
-        console.log(`📡 [RECHARGE] WebSocket atualizado para drone ${droneId}`);
+        broadcastDronePosition(updatedDrone);
+        console.log(`[RECHARGE] WebSocket atualizado para drone ${droneId}`);
 
         if (battery >= 100) {
           console.log(`[RECHARGE] Bateria carregada! Verificando status final...`);
@@ -511,12 +506,11 @@ async function rechargeBattery(req, res) {
             path: "entregas",
             populate: { path: "pedidos" }
           });
-          
+
+          let hasPending = false;
           if (fila && fila.entregas.length > 0) {
-            const currentEntrega = fila.entregas[0];
-            const currentPedido = currentEntrega.pedidos[0]; 
+            hasPending = fila.entregas.some(entrega => entrega.pedidos && entrega.pedidos.length > 0);
           }
-          
 
           const statusFinal = hasPending ? "reservado" : "disponivel";
           console.log(`[RECHARGE] Status final: ${statusFinal}`);
@@ -526,12 +520,11 @@ async function rechargeBattery(req, res) {
             status: statusFinal
           });
 
-          console.log(`[RECHARGE] Drone ${droneId} totalmente recarregado! Status: ${statusFinal}`);
-
           const finalDrone = await DroneModel.findById(droneId);
           broadcastDronePosition(finalDrone);
-          console.log(`📡 [RECHARGE] WebSocket final enviado`);
+          console.log(`[RECHARGE] WebSocket final enviado`);
         }
+
       } catch (err) {
         console.error(`[RECHARGE] Erro recarregando drone ${droneId}:`, err);
         clearInterval(interval);
