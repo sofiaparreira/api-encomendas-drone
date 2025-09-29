@@ -24,6 +24,9 @@ npm start
 
 
 Logo após, entre no repositório do front-end: https://github.com/sofiaparreira/frontend-encomendas-drone.git
+
+````
+
 ---
 
 ## 🛠 Tecnologias Utilizadas  
@@ -63,3 +66,4 @@ Logo após, entre no repositório do front-end: https://github.com/sofiaparreira
 
 6. **Recarregamento de Drones**  
    - O sistema permite recarregar a bateria gradualmente até o carregamento completo.  
+
