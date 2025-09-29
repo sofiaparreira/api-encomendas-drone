@@ -31,7 +31,7 @@ Logo após, entre no repositório do front-end: https://github.com/sofiaparreira
 
 ## 🛠 Tecnologias Utilizadas  
 - **JavaScript** – linguagem principal do projeto  
-- **Node.JS e Express*
+- **Node.JS e Express**
 
 ---
 
@@ -66,4 +66,5 @@ Logo após, entre no repositório do front-end: https://github.com/sofiaparreira
 
 6. **Recarregamento de Drones**  
    - O sistema permite recarregar a bateria gradualmente até o carregamento completo.  
+
 
