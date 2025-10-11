@@ -1,6 +1,8 @@
-import mongoose from "mongoose";
+const express = require("express");
+const mongoose = require("mongoose");
+const router = express.Router();
 
-export default async function handler(req, res) {
+router.get("/", async (req, res) => {
   try {
     await mongoose.connect(process.env.MONGODB_URI);
     await mongoose.connection.db.admin().ping();
@@ -9,4 +11,6 @@ export default async function handler(req, res) {
   } catch (err) {
     res.status(500).json({ error: "Erro ao pingar o MongoDB" });
   }
-}
+});
+
+module.exports = router;

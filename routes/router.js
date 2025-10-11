@@ -5,6 +5,7 @@ const droneRouter = require("./droneRouter");
 const pedidoRouter = require("./pedidoRouter")
 const prioridadeRouter = require("./prioridadeRouter")
 const filaRouter = require("./filaRouter")
+const pingRouter = require("./pingRouter")
 
 
 
@@ -12,6 +13,7 @@ router.use('/drone', droneRouter);
 router.use('/pedido', pedidoRouter)
 router.use('/prioridade', prioridadeRouter)
 router.use('/fila', filaRouter)
+router.use('/ping', pingRouter)
 
 
 router.get("/", (req, res) => {
